@@ -1,0 +1,295 @@
+---
+title: "Bellabeats Case Study"
+author: "Tony Ngassi"
+date: "2022-12-27"
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+  always_allow_html: yes
+---
+
+```{r Load Packages, warning=FALSE}
+library(htmltools)
+library(ggplot2)
+library(tidyverse)
+library(reshape2)
+library(lubridate)
+library(plotly)
+library(dplyr)
+library(readr)
+library(skimr)
+```
+
+## Load the data
+```{r warning=FALSE, include=FALSE}
+setwd("C:/Users/Tngas/Documents/Bellabeats Case Study/Data")
+
+daily_activity <- read.csv("dailyActivity_merged.csv")
+sleep_day <- read.csv("sleepDay_merged.csv")
+weight <- read.csv("weightLogInfo_merged.csv")
+calories <- read.csv("dailycalories_merged.csv")
+hourly_step <- read.csv("hourlySteps_merged.csv")
+head(daily_activity)
+head(calories)
+head(sleep_day)
+head(weight)
+```
+
+# Check for NA and Duplicates
+```{r}
+sum(is.na(daily_activity))
+sum(is.na(sleep_day))
+sum(is.na(weight))
+sum(is.na(calories))
+
+sum(duplicated(daily_activity))
+sum(duplicated(sleep_day))
+sum(duplicated(weight))
+sum(duplicated(calories))
+```
+# Remove Duplicates. The NA is from the "Fat" column with different dates.
+```{r}
+sleep_day <- sleep_day[!duplicated(sleep_day), ]
+sum(duplicated(sleep_day))
+```
+#adding a column for weekdays
+```{r}
+daily_activity <- daily_activity %>% mutate( Weekday = weekdays(as.Date(ActivityDate, "%m/%d/%Y")))
+
+merged <- merge(daily_activity, sleep_day,by = c("Id"), all=TRUE)
+merged2 <- merge(merged, calories, by = c("Id"), all=TRUE)
+merged_data <- merge(merged, weight,by = c("Id"), all=TRUE)
+```
+
+# Order Monday to Sunday
+```{r warning=FALSE}
+merged_data$Weekday <- factor(merged_data$Weekday, levels= c("Monday", 
+    "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+merged_data[order(merged_data$Weekday), ]
+```
+# Saved CSV for the Tableau
+```{r}
+write_csv(merged_data, "Merged_Bellabeats_data.csv")
+```
+
+#Check for NA and duplicates in merged data. 
+```{r}
+sum(is.na(merged_data))
+sum(duplicated(merged_data))
+n_distinct(merged_data$Id)
+```
+# Check unique users
+```{r}
+n_distinct(daily_activity$Id)
+n_distinct(sleep_day$Id)
+n_distinct(weight$Id)
+```
+# Check why weight table is missing so much data
+```{r}
+weight %>%
+  filter(IsManualReport == "True") %>%
+  group_by(Id) %>%
+  summarise("Manual Weight Reporting" = n()) %>%
+  distinct()
+```
+# Most active day when users are recording their data.
+```{r}
+ggplot(data = merged_data, aes(x=Weekday)) +
+  geom_bar(fill="steelblue") + 
+  labs(title = "Data Recording")
+```
+#Weekly summary
+```{r}
+ggplot(data = merged_data, aes(x=Weekday, y=TotalSteps, fill=Weekday))+
+  geom_bar(stat = "identity", fill="lightblue")+
+  labs(title = "Steps by Weekday", y="Total Steps")
+
+ggplot(data=merged_data, aes(x=Weekday, y=Calories, fill=Weekday))+ 
+  geom_bar(stat="identity", fill="orange")+
+  labs(title = "Calories by Weekday", y="Total Calories")
+
+ggplot(data = merged_data, aes(x=Weekday, y=TotalMinutesAsleep, fill=Weekday))+
+  geom_bar(stat = "Identity", fill="lightblue")+
+  labs(title="Total Minutes Asleep by Weekday", y="Total Minutes Asleep")
+
+ggplot(data = merged_data, aes(x=Weekday, y=SedentaryMinutes, fill=Weekday))+
+  geom_bar(stat = "identity", fill="darkblue")+
+  labs(title = "Sedentary Minutes by Weekday", y="Sedentary Minutes")
+
+ggplot(data = merged_data, aes(x=Weekday, y=TotalDistance, fill=Weekday))+ 
+  geom_bar(stat = "identity")
+```
+#Hourly Summary
+```{r}
+hourly_step$ActivityHour=as.POSIXct(hourly_step$ActivityHour,format="%m/%d/%Y %I:%M:%S %p")
+hourly_step$Hour <-  format(hourly_step$ActivityHour,format= "%H")
+head(hourly_step)
+
+ggplot(data = hourly_step, aes(x=Hour, y=StepTotal, fill=Hour))+
+  geom_bar(stat = "identity")+ labs(title = "Hourly Steps")
+
+
+merged_data_hour <- merge(merged_data, hourly_step, by = c("Id"), all=TRUE)
+write_csv(merged_data_hour, "merged_data_hour.csv")
+```
+# Summary of mean, median, min, max for the tables 
+```{r}
+daily_activity %>%
+  dplyr::select(TotalSteps,
+                TotalDistance,
+                VeryActiveMinutes,
+                FairlyActiveMinutes,
+                LightlyActiveMinutes,
+                SedentaryMinutes,
+                Calories) %>%
+  summary()
+
+sleep_day %>%
+  dplyr::select(TotalSleepRecords,
+                TotalMinutesAsleep,
+                TotalTimeInBed) %>%
+  summary()
+
+weight %>%
+  dplyr::select(WeightPounds,
+                BMI) %>%
+  summary()
+
+# Summary for Merged data in case I need it
+merged_data %>%
+  dplyr::select(Weekday,
+                TotalSteps,
+                TotalDistance,
+                VeryActiveMinutes,
+                FairlyActiveMinutes, 
+                LightlyActiveMinutes,
+                SedentaryMinutes,
+                Calories,
+                TotalMinutesAsleep,
+                TotalTimeInBed,
+                WeightPounds,
+                BMI) %>%
+  summary()
+```
+# Analyze active minutes, calories, and total steps. WHO and AHA recommend 150 minutes of moderate intensity activity or 75 minutes of vigorous activity or combination each week. Daily goal of 21.4 minutes of Fairly Active minutes or 10.7 of Very Active Minutes
+```{r warning=FALSE}
+#Active Users
+active_users <- daily_activity %>%
+  filter(FairlyActiveMinutes >= 21.4 | VeryActiveMinutes>=10.7) %>%
+  group_by(Id) %>%
+  count(Id)
+
+total_minutes <- sum(daily_activity$SedentaryMinutes, daily_activity$VeryActiveMinutes, daily_activity$FairlyActiveMinutes, daily_activity$LightlyActiveMinutes)
+sedentary_percentage <- sum(daily_activity$SedentaryMinutes)/total_minutes*100
+lightly_percentage <- sum(daily_activity$LightlyActiveMinutes)/total_minutes*100
+fairly_percentage <- sum(daily_activity$FairlyActiveMinutes)/total_minutes*100
+active_percentage <- sum(daily_activity$VeryActiveMinutes)/total_minutes*100
+
+
+# Pie Charts
+
+percentage <- data.frame(
+  level=c("Sedentary", "Lightly Active", "Very Active", "Fairly Active"),
+  minutes=c(sedentary_percentage, lightly_percentage, fairly_percentage, active_percentage)
+)
+
+plot_ly(percentage, labels = ~level, values = ~minutes, type = 'pie',textposition = 'outside',textinfo = 'label+percent') %>%
+  layout(title = 'Activity Level Minutes',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+
+#User activity
+active_minute <- daily_activity %>%
+  gather(key=Intensity, value=active_minutes, ends_with("minutes")) %>%
+  select(Intensity, active_minutes)
+
+ggplot(data=active_minute, aes(x=Intensity, y=active_minutes))+
+  geom_boxplot(aes(fill=Intensity))+
+  scale_x_discrete(limits=c("SedentaryMinutes","LightlyActiveMinutes","FairlyActiveMinutes","VeryActiveMinutes"))+
+  ylab("Minutes")
+
+# Total Steps vs Sedentary Minutes with calories and total distance.
+par(mfrow = c(2, 2))
+ggplot(data=daily_activity, aes(x=TotalSteps, y=SedentaryMinutes, color=Calories))+ 
+  geom_point()+
+  stat_smooth(method=lm)+
+  scale_color_gradient(low="blue", high="orange")
+  
+ggplot(data=daily_activity, aes(x=TotalSteps, y=SedentaryMinutes, color=TotalDistance))+ 
+  geom_point()+
+  stat_smooth(method=lm)+
+  scale_color_gradient(low="blue", high="orange")
+
+
+# some sedentary take minimal step, but still able to burn over 1500 to 2500 calories
+ggplot(data=daily_activity, aes(x=TotalSteps, y = Calories, color=SedentaryMinutes))+ 
+  geom_point()+ 
+  labs(title="Total Steps vs Calories")+
+  xlab("Total Steps")+
+  stat_smooth(method=lm)+
+  scale_color_gradient(low="orange", high="steelblue")
+
+#Users who take more steps are burning more calories and have lower BMIs. 
+ggplot(data=merged_data, aes(x=TotalSteps, y = BMI, color=Calories))+ 
+  geom_point()+
+  labs(title = "Total Steps vs BMI")+
+  stat_smooth(method=lm)+
+   scale_color_gradient(low="blue", high="yellow")
+```
+# Making a category for sleeping time and a new table to show sleep categories percent for each individual user type
+```{r}
+sleepType_by_userType <- merged_data %>%
+  group_by(Id) %>%
+  summarise(
+    user_type = factor(case_when(
+      SedentaryMinutes > mean(SedentaryMinutes) & LightlyActiveMinutes < mean(LightlyActiveMinutes) & FairlyActiveMinutes < mean(FairlyActiveMinutes) & VeryActiveMinutes < mean(VeryActiveMinutes) ~ "Sedentary",
+      SedentaryMinutes < mean(SedentaryMinutes) & LightlyActiveMinutes > mean(LightlyActiveMinutes) & FairlyActiveMinutes < mean(FairlyActiveMinutes) & VeryActiveMinutes < mean(VeryActiveMinutes) ~ "Lightly Active",
+    SedentaryMinutes < mean(SedentaryMinutes) & LightlyActiveMinutes < mean(LightlyActiveMinutes) & FairlyActiveMinutes > mean(FairlyActiveMinutes) & VeryActiveMinutes < mean(VeryActiveMinutes) ~ "Fairly Active",
+    SedentaryMinutes < mean(SedentaryMinutes) & LightlyActiveMinutes < mean(LightlyActiveMinutes) & FairlyActiveMinutes < mean(FairlyActiveMinutes) & VeryActiveMinutes > mean(VeryActiveMinutes) ~ "Very Active",
+),levels=c("Sedentary", "Lightly Active", "Fairly Active", "Very Active")),
+sleep_type = factor(case_when(
+    mean(TotalMinutesAsleep) < 360 ~ "Bad Sleep",
+    mean(TotalMinutesAsleep) > 360 & mean(TotalMinutesAsleep) <= 480 ~ "Normal Sleep",
+    mean(TotalMinutesAsleep) > 480 ~ "Over Sleep",
+),levels=c("Bad Sleep", "Normal Sleep", "Over Sleep")), total_sleep = sum(TotalMinutesAsleep) ,.groups="drop"
+) %>%
+drop_na() %>%
+group_by(user_type) %>%
+summarise(bad_sleepers = sum(sleep_type == "Bad Sleep"), normal_sleepers = sum(sleep_type == "Normal Sleep"),over_sleepers = sum(sleep_type == "Over Sleep"),total=n(),.groups="drop") %>%
+group_by(user_type) %>%
+summarise(
+    bad_sleepers = bad_sleepers / total, 
+    normal_sleepers = normal_sleepers / total, 
+    over_sleepers = over_sleepers / total,
+    .groups="drop"
+)
+```
+
+# Graph for the above data
+```{r warning=FALSE}
+sleepType_by_userType_melted<- melt(sleepType_by_userType, id.vars = "user_type")
+
+ggplot(sleepType_by_userType_melted, aes(user_type, value, fill = variable)) +
+geom_bar(position = "dodge", stat = "identity", color= "black") +
+scale_y_continuous(labels = scales::percent) +
+labs(x=NULL, fill="Sleep type") + 
+theme(legend.position="right",text = element_text(size = 10),plot.title = element_text(hjust = 1.0))
+```
+
+# Sleep hours vs calories burned
+```{r}
+ggplot(data=merged_data, aes(x=TotalMinutesAsleep, y = Calories, color=TotalMinutesAsleep))+ 
+  geom_point()+ 
+  labs(title="Total Minutes Asleep vs Calories")+
+  xlab("Total Minutes Asleep")+
+  stat_smooth(method=lm)+
+  scale_color_gradient(low="orange", high="steelblue")
+```
+
+
+
+
+
